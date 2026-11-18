@@ -1,0 +1,11 @@
+# Wheelance Python 3.11 dependencies
+streamlit==1.41.1
+mediapipe==0.10.14
+opencv-contrib-python==4.11.0.86  # mediapipe가 요구하는 OpenCV (headless와 함께 설치하면 서로 덮어씀)
+numpy==1.26.4
+streamlit-webrtc==0.67.4  # Streamlit 1.41과 호환되는 최신 버전 (0.47은 연결이 반복해서 끊김)
+streamlit-image-coordinates==0.3.1
+plotly==5.24.1
+pandas==2.2.3
+firebase-admin==6.5.0
+requests==2.32.3

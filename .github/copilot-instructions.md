@@ -1,0 +1,5 @@
+- 한국어로 짧게 답한다.
+- Python은 항상 `.venv\Scripts\python.exe`로 실행한다. pytest는 쓰지 않는다.
+- `test_app.py`는 `$env:PYTHONIOENCODING="utf-8"`를 붙여 실행한다.
+- 코드를 고친 뒤에는 `tests/test_algo.py`, `tests/test_app.py`를 실행한다.
+- `secrets.toml`, `*firebase-adminsdk*.json`은 읽거나 출력하지 않는다.

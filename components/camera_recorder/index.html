@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>휠런스 촬영</title>
+<style>
+/* 사이트 안 촬영 화면: 카메라 + 수평선(기울기 센서) + 흔들림 안내 + 녹화 */
+:root { --bg: #ffffff; --ink: #1f1a27; --muted: #6c6478; --line: #d8d0e6; --purple: #6b3fa0; --ok: #1d9e75; --bad: #d64545; --warn: #e08a00; }
+body.dark { --bg: #0e1117; --ink: #ede8f5; --muted: #a79fb4; --line: #3a3147; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: Pretendard, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+#wrap { display: flex; flex-direction: column; gap: 10px; padding: 2px; }
+/* 높이에 vh를 쓰면 안 된다: 컴포넌트 iframe의 높이를 이 내용으로 정하므로 서로 물려 0이 된다 */
+#stage { position: relative; width: 100%; aspect-ratio: 3 / 4; max-height: 560px; background: #000; border-radius: 16px; overflow: hidden; }
+@media (min-width: 600px) { #stage { aspect-ratio: 16 / 9; } }
+video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+#preview { display: none; }
+.overlay { position: absolute; inset: 0; pointer-events: none; }
+#refLine { position: absolute; left: 6%; right: 6%; top: 50%; border-top: 2px dashed rgba(255,255,255,0.55); }
+#levelLine { position: absolute; left: 10%; right: 10%; top: 50%; height: 0; border-top: 4px solid var(--bad); transform-origin: 50% 50%; transition: border-color 0.2s; }
+#levelLine.ok { border-color: var(--ok); }
+#pill { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); padding: 7px 14px; border-radius: 999px; font-size: 15px; font-weight: 700; color: #fff; background: var(--bad); white-space: nowrap; max-width: 94%; overflow: hidden; text-overflow: ellipsis; }
+#pill.ok { background: var(--ok); }
+#pill.none { background: rgba(0,0,0,0.6); }
+#big { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #fff; font-weight: 800; font-size: 26px; padding: 0 8%; text-shadow: 0 2px 8px rgba(0,0,0,0.7); }
+#big.count { font-size: 96px; }
+#shake { position: absolute; left: 6%; right: 6%; bottom: 52px; padding: 12px; border-radius: 12px; background: rgba(214,69,69,0.92); color: #fff; font-size: 18px; font-weight: 800; text-align: center; display: none; }
+#rec { position: absolute; right: 12px; bottom: 12px; display: none; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; background: rgba(0,0,0,0.6); color: #fff; font-size: 14px; font-weight: 700; }
+#rec i { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); display: inline-block; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+select, button { font: inherit; font-size: 16px; min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: var(--ink); padding: 0 14px; }
+button { font-weight: 700; cursor: pointer; flex: 1 1 auto; }
+button.primary { background: var(--purple); border-color: var(--purple); color: #fff; }
+label { font-size: 14px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+#msg { font-size: 15px; line-height: 1.55; margin: 0; }
+#summary { font-size: 15px; line-height: 1.6; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; display: none; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <video id="live" playsinline muted autoplay></video>
+    <video id="preview" playsinline controls></video>
+    <div class="overlay" id="guides">
+      <div id="refLine"></div>
+      <div id="levelLine"></div>
+      <div id="pill" class="none">카메라를 켜는 중…</div>
+      <div id="big"></div>
+      <div id="shake">흔들려요! 휴대폰을 고정해주세요</div>
+      <div id="rec"><i></i><span id="recTime">0초</span></div>
+    </div>
+  </div>
+  <p id="msg"></p>
+  <div class="row" id="setup">
+    <button id="flipBtn" type="button">카메라 전환</button>
+    <label>촬영 <select id="dur"></select></label>
+    <label>시작 전 대기 <select id="wait"></select></label>
+  </div>
+  <div class="row"><button id="startBtn" class="primary" type="button">녹화 시작</button></div>
+  <p id="summary"></p>
+  <div class="row hidden" id="after">
+    <button id="retryBtn" type="button">다시 찍기</button>
+    <button id="useBtn" class="primary" type="button">이 영상으로 분석하기</button>
+  </div>
+</div>
+<script>
+// ---------- Streamlit 컴포넌트 통신 (npm 없이 postMessage로 직접) ----------
+function send(type, data) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data || {}), "*"); }
+let lastHeight = -1;
+function setHeight() {
+  const height = document.getElementById("wrap") ? document.getElementById("wrap").scrollHeight + 8 : 0;
+  if (height !== lastHeight) { lastHeight = height; send("streamlit:setFrameHeight", {height: height}); }
+}
+// 탭이 가려진 채로 그려지면 높이가 0으로 잡히므로, 보일 때까지 주기적으로 다시 알린다.
+setInterval(setHeight, 400);
+let args = {level_ok_deg: 2, pitch_warn_deg: 12, shake_accel: 0.7, durations: [10, 15, 20], default_duration: 15, waits: [5, 10], default_wait: 10, still_seconds: 3, bitrate: 1500000, max_mb: 25};
+let started = false;
+window.addEventListener("message", function (event) {
+  const data = event.data || {};
+  if (data.type !== "streamlit:render") return;
+  Object.assign(args, data.args || {});
+  const theme = data.theme || {};
+  document.body.classList.toggle("dark", theme.base === "dark");
+  if (!started) { started = true; init(); }
+  setHeight();
+});
+send("streamlit:componentReady", {apiVersion: 1});
+new ResizeObserver(setHeight).observe(document.body);
+
+// ---------- 화면 요소 ----------
+const $ = (id) => document.getElementById(id);
+const live = $("live"), preview = $("preview"), pill = $("pill"), levelLine = $("levelLine"), big = $("big"), shakeBox = $("shake");
+const msg = $("msg"), summary = $("summary");
+let stream = null, facing = "environment", recorder = null, chunks = [], recordedBlob = null, recordedMime = "";
+let phase = "setup";  // setup → countdown → recording → done
+
+// ---------- 기울기·흔들림 (휴대폰 센서) ----------
+// 중력 방향으로 휴대폰이 화면 기준 몇 도 돌아갔는지(roll)와 위아래로 숙였는지(pitch)를 잰다.
+let roll = null, pitch = null, shake = 0, sensorSeen = false;
+let stats = {maxTilt: 0, shakeTicks: 0, ticks: 0, rolls: []};
+function median(values) {
+  if (!values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b), middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+function screenAngle() {
+  if (screen.orientation && typeof screen.orientation.angle === "number") return screen.orientation.angle;
+  return typeof window.orientation === "number" ? window.orientation : 0;
+}
+function onMotion(event) {
+  const g = event.accelerationIncludingGravity;
+  if (!g || g.x === null || g.y === null) return;
+  sensorSeen = true;
+  // 기기 축 → 화면 축 (화면이 돌아간 각도만큼 되돌림)
+  const a = screenAngle() * Math.PI / 180;
+  let x = g.x * Math.cos(a) - g.y * Math.sin(a);
+  let y = g.x * Math.sin(a) + g.y * Math.cos(a);
+  const z = g.z || 0;
+  // 세워 둔 휴대폰은 화면 위쪽(+y)이 중력 반대쪽이어야 한다. 기기마다 부호가 반대인 경우가 있어 맞춰 준다.
+  if (y < 0) { x = -x; y = -y; }
+  roll = Math.atan2(-x, y) * 180 / Math.PI;           // + = 휴대폰이 시계 방향으로 돌아감
+  pitch = Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI; // 카메라가 위/아래를 향한 정도
+  // 흔들림: 중력을 뺀 가속도 크기를 부드럽게 평균
+  const acc = event.acceleration;
+  let magnitude = 0;
+  if (acc && acc.x !== null) magnitude = Math.hypot(acc.x || 0, acc.y || 0, acc.z || 0);
+  else magnitude = Math.abs(Math.hypot(g.x, g.y, z) - 9.81);
+  shake = shake * 0.85 + magnitude * 0.15;
+}
+function needsPermission() { return typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function"; }
+let sensorAsked = false;
+async function enableSensor() {
+  if (sensorAsked) return;
+  try {
+    if (needsPermission()) {
+      const answer = await DeviceMotionEvent.requestPermission();
+      sensorAsked = true;  // 허락이든 거절이든 답을 받았으면 다시 묻지 않는다
+      if (answer !== "granted") { msg.textContent = "기울기 센서를 허용하지 않아 수평 안내 없이 찍어요. 아이폰은 설정 → Safari → '동작 및 방향 접근'을 켠 뒤 다시 눌러주세요."; return; }
+    }
+    sensorAsked = true;
+    window.addEventListener("devicemotion", onMotion);
+    msg.textContent = "기울기 센서를 켰어요. 빨간 선이 초록색이 될 때까지 수평을 맞춰주세요.";
+  } catch (error) { msg.textContent = "기울기 센서를 아직 못 켰어요. 화면을 한 번 더 톡 눌러주세요. (" + error.message + ")"; }
+}
+
+// ---------- 카메라 ----------
+async function startCamera() {
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({audio: false, video: {facingMode: {ideal: facing}, width: {ideal: 1280}, height: {ideal: 720}}});
+    live.srcObject = stream;
+    await live.play().catch(() => {});
+    msg.textContent = "휴대폰을 세워 고정하고, 빨간 선이 초록색이 될 때까지 기울기를 맞춰주세요.";
+  } catch (error) {
+    pill.className = "none"; pill.textContent = "카메라를 쓸 수 없어요";
+    msg.textContent = "카메라를 켜지 못했어요. 브라우저에서 카메라 권한을 허용했는지 확인해주세요. 휴대폰은 https 주소에서만 카메라가 켜져요. 안 되면 '찍어둔 영상 올리기'를 써주세요. (" + error.name + ")";
+  }
+}
+
+// ---------- 화면 안내 갱신 (초당 약 10번) ----------
+function levelState() {
+  if (roll === null) return {ok: null, text: sensorSeen ? "기울기 확인 중" : needsPermission() ? "화면을 한 번 누르면 수평 안내가 켜져요" : "기울기 센서 없음 · 수평은 눈으로 맞춰주세요"};
+  const tilt = Math.abs(roll);
+  if (pitch !== null && Math.abs(pitch) > args.pitch_warn_deg) return {ok: false, text: "카메라가 위나 아래를 보고 있어요 · 똑바로 세워주세요"};
+  if (tilt <= args.level_ok_deg) return {ok: true, text: "수평이 맞았어요 ✓ " + tilt.toFixed(1) + "°"};
+  // 녹화 중에는 다시 설정하라고 하지 않는다 (사람은 멀리 있음). 기울기만 알려 주고 끝난 뒤 요약에 남긴다.
+  if (phase === "recording" || phase === "countdown") return {ok: false, text: "휴대폰이 " + tilt.toFixed(0) + "° 기울었어요"};
+  return {ok: false, text: "휴대폰이 " + tilt.toFixed(0) + "° 기울었어요 · 다시 설정해주세요"};
+}
+setInterval(function () {
+  const state = levelState();
+  pill.textContent = state.text;
+  pill.className = state.ok === null ? "none" : (state.ok ? "ok" : "");
+  if (roll !== null) {
+    levelLine.style.display = "block";
+    levelLine.style.transform = "rotate(" + (-roll).toFixed(2) + "deg)";
+    levelLine.className = state.ok ? "ok" : "";
+  } else { levelLine.style.display = "none"; }
+  const shaking = sensorSeen && shake > args.shake_accel;
+  shakeBox.style.display = (phase === "recording" || phase === "countdown") && shaking ? "block" : "none";
+  if (phase === "recording") {
+    stats.ticks += 1;
+    if (shaking) stats.shakeTicks += 1;
+    if (roll !== null) { stats.maxTilt = Math.max(stats.maxTilt, Math.abs(roll)); stats.rolls.push(roll); }
+  }
+}, 100);
+
+// ---------- 녹화 ----------
+function pickMime() {
+  const options = ["video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+  for (const type of options) { if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type)) return type; }
+  return "";
+}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function startRecording() {
+  if (!stream) { msg.textContent = "카메라가 켜져 있지 않아요."; return; }
+  if (!window.MediaRecorder) { msg.textContent = "이 브라우저는 녹화를 지원하지 않아요. '찍어둔 영상 올리기'를 써주세요."; return; }
+  const state = levelState();
+  if (state.ok === false) msg.textContent = "아직 수평이 맞지 않았지만 찍을게요. 결과가 부정확할 수 있어요.";
+  $("setup").classList.add("hidden"); $("startBtn").classList.add("hidden");
+  // 대기: 휴대폰을 두고 출발 위치로 이동하는 시간
+  phase = "countdown";
+  const wait = Number($("wait").value);
+  for (let left = wait; left > 0; left--) {
+    big.className = "count"; big.textContent = left;
+    msg.textContent = "출발 위치로 가서 준비해주세요. 녹화가 시작되면 " + args.still_seconds + "초 동안 가만히 있어주세요.";
+    await sleep(1000);
+  }
+  // 녹화
+  stats = {maxTilt: 0, shakeTicks: 0, ticks: 0, rolls: []};
+  chunks = []; recordedMime = pickMime();
+  recorder = new MediaRecorder(stream, recordedMime ? {mimeType: recordedMime, videoBitsPerSecond: args.bitrate} : {videoBitsPerSecond: args.bitrate});
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  const stopped = new Promise((resolve) => { recorder.onstop = resolve; });
+  recorder.start(1000);
+  phase = "recording";
+  msg.textContent = "녹화 중이에요. 처음 " + args.still_seconds + "초는 가만히, 그다음 평소처럼 밀어주세요.";
+  $("rec").style.display = "flex";
+  const duration = Number($("dur").value);
+  const startedAt = performance.now();
+  while (true) {
+    const sec = (performance.now() - startedAt) / 1000;
+    if (sec >= duration) break;
+    $("recTime").textContent = Math.floor(sec) + " / " + duration + "초";
+    if (sec < args.still_seconds) { big.className = ""; big.textContent = "가만히 계세요 " + Math.ceil(args.still_seconds - sec); }
+    else if (sec < args.still_seconds + 1.5) { big.className = ""; big.textContent = "이제 평소처럼 밀어주세요"; }
+    else { big.textContent = ""; }
+    await sleep(200);
+  }
+  recorder.stop(); await stopped;
+  phase = "done";
+  $("rec").style.display = "none"; big.textContent = ""; shakeBox.style.display = "none";
+  recordedBlob = new Blob(chunks, {type: recordedMime || (chunks[0] && chunks[0].type) || "video/webm"});
+  preview.src = URL.createObjectURL(recordedBlob);
+  live.style.display = "none"; preview.style.display = "block"; $("guides").classList.add("hidden");
+  showSummary();
+}
+function showSummary() {
+  const lines = [];
+  const shakeRatio = stats.ticks ? stats.shakeTicks / stats.ticks : 0;
+  if (!sensorSeen) lines.push("ℹ️ 기울기 센서가 없어 수평·흔들림은 확인하지 못했어요.");
+  else {
+    lines.push(stats.maxTilt <= args.level_ok_deg * 2 ? "✅ 녹화하는 동안 수평이 잘 맞았어요 (최대 " + stats.maxTilt.toFixed(1) + "°)" : "⚠️ 녹화 중 휴대폰이 최대 " + stats.maxTilt.toFixed(0) + "° 기울었어요. 다시 찍는 걸 권해요.");
+    lines.push(shakeRatio < 0.1 ? "✅ 흔들림 없이 찍혔어요" : "⚠️ 녹화 시간의 " + Math.round(shakeRatio * 100) + "% 동안 흔들렸어요. 휴대폰을 고정하고 다시 찍는 걸 권해요.");
+  }
+  const mb = recordedBlob.size / 1048576;
+  lines.push("영상 크기 " + mb.toFixed(1) + "MB");
+  summary.innerHTML = lines.join("<br>");
+  summary.style.display = "block";
+  $("after").classList.remove("hidden");
+  msg.textContent = "영상을 확인하고, 괜찮으면 '이 영상으로 분석하기'를 눌러주세요.";
+  stats.shakeRatio = shakeRatio;
+}
+function retry() {
+  recordedBlob = null; preview.removeAttribute("src");
+  preview.style.display = "none"; live.style.display = "block"; $("guides").classList.remove("hidden");
+  summary.style.display = "none"; $("after").classList.add("hidden");
+  $("setup").classList.remove("hidden"); $("startBtn").classList.remove("hidden");
+  phase = "setup"; msg.textContent = "휴대폰을 세워 고정하고, 선이 초록색이 될 때까지 기울기를 맞춰주세요.";
+}
+function useVideo() {
+  if (!recordedBlob) return;
+  if (recordedBlob.size / 1048576 > args.max_mb) { msg.textContent = "영상이 너무 커요. 촬영 시간을 줄여 다시 찍어주세요."; return; }
+  msg.textContent = "영상을 보내는 중…";
+  const reader = new FileReader();
+  reader.onload = function () {
+    const base64 = String(reader.result).split(",")[1] || "";
+    send("streamlit:setComponentValue", {dataType: "json", value: {
+      id: Date.now(), video_b64: base64, mime: recordedBlob.type,
+      seconds: Number($("dur").value), sensor: sensorSeen,
+      max_tilt: sensorSeen ? Math.round(stats.maxTilt * 10) / 10 : null,
+      shake_ratio: sensorSeen ? Math.round((stats.shakeRatio || 0) * 100) / 100 : null,
+      // 녹화 중 휴대폰 기울기 중앙값(+ = 시계 방향)과 쓴 카메라 → 정면 각도 보정에 쓴다
+      roll_median: sensorSeen && stats.rolls.length ? Math.round(median(stats.rolls) * 100) / 100 : null,
+      facing: facing,
+    }});
+    msg.textContent = "보냈어요. 아래에서 분석이 시작돼요.";
+  };
+  reader.readAsDataURL(recordedBlob);
+}
+
+// ---------- 시작 ----------
+function init() {
+  args.durations.forEach((d) => { const o = document.createElement("option"); o.value = d; o.textContent = d + "초"; if (d === args.default_duration) o.selected = true; $("dur").appendChild(o); });
+  args.waits.forEach((d) => { const o = document.createElement("option"); o.value = d; o.textContent = d + "초"; if (d === args.default_wait) o.selected = true; $("wait").appendChild(o); });
+  $("startBtn").onclick = startRecording;
+  $("retryBtn").onclick = retry;
+  $("useBtn").onclick = useVideo;
+  $("flipBtn").onclick = () => { facing = facing === "environment" ? "user" : "environment"; startCamera(); };
+  // 기울기 센서는 처음부터 켠다. 아이폰만 브라우저 규칙상 '사용자가 한 번 누른 뒤'에야 허락을 물을 수 있어서,
+  // 화면 어디든 처음 누를 때(녹화 시작 포함) 자동으로 허락을 묻는다. 따로 버튼을 두지 않는다.
+  if (needsPermission()) {
+    // 아이폰 사파리는 'click/touchend'(손을 뗀 순간) 안에서만 권한을 물을 수 있다. pointerdown에서는 거절된다.
+    // 허락을 받을 때까지(또는 사용자가 거절할 때까지) 탭할 때마다 다시 시도한다.
+    const ask = async () => {
+      await enableSensor();
+      if (sensorAsked) { document.removeEventListener("click", ask, true); document.removeEventListener("touchend", ask, true); }
+    };
+    document.addEventListener("click", ask, true);
+    document.addEventListener("touchend", ask, true);
+  } else if (typeof DeviceMotionEvent !== "undefined") window.addEventListener("devicemotion", onMotion);
+  startCamera();
+}
+</script>
+</body>
+</html>

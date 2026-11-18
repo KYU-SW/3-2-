@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+/* 관절 마네킹 재생: 상체·머리는 영상에서 뽑은 동작, 다리·의자는 앉은 고정 자세 */
+:root { --stage: #ece8f4; --ink: #2b2236; --muted: #6c6478; --line: #d4cce2; --purple: #6b3fa0; }
+@media (prefers-color-scheme: dark) { :root { --stage: #221c2b; --ink: #ede8f5; --muted: #a79fb4; --line: #3a3147; --purple: #9b73d2; } }
+html, body { margin: 0; background: transparent; color: var(--ink); font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+#stage { position: relative; width: 100%; height: 260px; border-radius: 14px; background: var(--stage); overflow: hidden; touch-action: none; cursor: grab; }
+#stage canvas { display: block; width: 100%; height: 100%; }
+.legend { font-size: 12px; color: var(--muted); margin-top: 6px; }
+#caption { display: flex; align-items: center; justify-content: center; min-height: 48px; box-sizing: border-box; margin-bottom: 8px;
+  padding: 8px 14px; border-radius: 12px; background: var(--purple); color: #fff; font-size: 16px; font-weight: 700;
+  line-height: 1.35; text-align: center; word-break: keep-all; }
+#caption:empty { visibility: hidden; }
+#stepno { position: absolute; right: 10px; bottom: 8px; font-size: 15px; font-weight: 700; color: #fff; background: #6B3FA0; border-radius: 999px; padding: 3px 10px; }
+#stepno:empty { display: none; }
+.bar { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+button { font: 600 14px inherit; font-family: inherit; color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; min-height: 40px; cursor: pointer; flex: 1 1 auto; }
+button[aria-pressed="true"] { border-color: var(--purple); color: var(--purple); }
+#err { color: #c0392b; font-size: 13px; }
+</style></head>
+<body>
+<div id="caption"></div>
+<div id="stage"><div id="stepno"></div></div>
+<div class="bar">
+  <button id="play" type="button">정지</button>
+  <button type="button" data-v="diag" aria-pressed="true">비스듬히</button>
+  <button type="button" data-v="front" aria-pressed="false">앞</button>
+  <button type="button" data-v="side" aria-pressed="false">옆</button>
+  <button id="speed" type="button">속도 보통</button>
+</div>
+<div id="err"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const MOTION = __MOTION__;
+try {
+  const stage = document.getElementById('stage');
+  const renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  stage.insertBefore(renderer.domElement, stage.firstChild);
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(32, 1, 0.1, 50);
+  const target = new THREE.Vector3(0, 0.82, 0.1);
+  const views = {diag: Math.PI / 4, front: 0, side: Math.PI / 2};
+  let yaw = views.diag, pitch = 0.12;
+  function placeCam() { const d = 3.0 * Math.max(1, 1.3 / cam.aspect); cam.position.set(target.x + d * Math.cos(pitch) * Math.sin(yaw), target.y + d * Math.sin(pitch), target.z + d * Math.cos(pitch) * Math.cos(yaw)); cam.lookAt(target); }
+  function size() { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); placeCam(); }
+  let drag = null;
+  stage.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY]; stage.setPointerCapture(e.pointerId); });
+  stage.addEventListener('pointermove', e => { if (!drag) return; yaw -= (e.clientX - drag[0]) * 0.01; pitch = Math.max(-0.2, Math.min(1.2, pitch + (e.clientY - drag[1]) * 0.01)); drag = [e.clientX, e.clientY]; placeCam(); press(null); });
+  stage.addEventListener('pointerup', () => drag = null);
+  const viewButtons = document.querySelectorAll('[data-v]');
+  function press(v) { viewButtons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v))); }
+  viewButtons.forEach(b => b.onclick = () => { yaw = views[b.dataset.v]; pitch = 0.12; placeCam(); press(b.dataset.v); });
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a80a8, 0.95));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.75); sun.position.set(2, 4, 3); scene.add(sun);
+  const bodyMat = new THREE.MeshStandardMaterial({color: 0xd9d2e8, roughness: 0.55});
+  const jointMat = new THREE.MeshStandardMaterial({color: 0x734091, roughness: 0.4});
+  const noseMat = new THREE.MeshStandardMaterial({color: 0xef9f27, roughness: 0.4});
+  const eyeMat = new THREE.MeshStandardMaterial({color: 0x2b2236, roughness: 0.4});
+  const chairMat = new THREE.MeshStandardMaterial({color: 0x9a98a0, roughness: 0.8});
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(1.0, 48), new THREE.MeshStandardMaterial({color: 0x9d95b5, roughness: 1}));
+  floor.rotation.x = -Math.PI / 2; scene.add(floor);
+  const box = (w, h, d, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), chairMat); m.position.set(x, y, z); scene.add(m); };
+  box(0.5, 0.05, 0.46, 0, 0.44, 0.05); box(0.5, 0.45, 0.04, 0, 0.69, -0.2);
+  [[-0.22, -0.15], [0.22, -0.15], [-0.22, 0.25], [0.22, 0.25]].forEach(([x, z]) => box(0.035, 0.42, 0.035, x, 0.21, z));
+  const UP = new THREE.Vector3(0, 1, 0), V = (x, y, z) => new THREE.Vector3(x, y, z);
+  // 휠체어 바퀴 (휠체어 미는 법 동작에만): 큰 바퀴 + 손잡이 테(림, 보라)
+  const wheel = (MOTION.props || {}).wheelchair;
+  if (wheel) {
+    const tireMat = new THREE.MeshStandardMaterial({color: 0x44404d, roughness: 0.9});
+    const rimMat = new THREE.MeshStandardMaterial({color: 0x9b73d2, roughness: 0.4});
+    [1, -1].forEach(side => {
+      const tire = new THREE.Mesh(new THREE.TorusGeometry(wheel.rim + 0.04, 0.022, 12, 48), tireMat);
+      tire.rotation.y = Math.PI / 2; tire.position.set(side * (wheel.x + 0.03), wheel.y + 0.52, wheel.z + 0.02); scene.add(tire);
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(wheel.rim, 0.009, 8, 48), rimMat);
+      rim.rotation.y = Math.PI / 2; rim.position.set(side * wheel.x, wheel.y + 0.52, wheel.z + 0.02); scene.add(rim);
+    });
+  }
+  const limb = r => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.9, 1, 20), bodyMat); scene.add(m); return m; };
+  const place = (m, a, b) => { const d = new THREE.Vector3().subVectors(b, a); const len = Math.max(d.length(), 1e-4); m.position.copy(a).addScaledVector(d, 0.5); m.scale.set(1, len, 1); m.quaternion.setFromUnitVectors(UP, d.normalize()); };
+  const ball = (r, mat) => { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16), mat); scene.add(m); return m; };
+  // 다리 (고정, 의자에 앉음)
+  const HIP = V(0, 0.52, 0.02);
+  const fixed = {hL: V(-0.11, 0.52, 0.02), hR: V(0.11, 0.52, 0.02), kL: V(-0.12, 0.53, 0.44), kR: V(0.12, 0.53, 0.44), aL: V(-0.12, 0.07, 0.47), aR: V(0.12, 0.07, 0.47)};
+  [[fixed.hL, fixed.kL], [fixed.hR, fixed.kR]].forEach(([a, b]) => place(limb(0.06), a, b));
+  [[fixed.kL, fixed.aL], [fixed.kR, fixed.aR]].forEach(([a, b]) => place(limb(0.042), a, b));
+  place(limb(0.05), fixed.hL, fixed.hR);
+  for (const k in fixed) ball(k[0] === 'a' ? 0.045 : 0.055, jointMat).position.copy(fixed[k]);
+  // 움직이는 부분
+  // 몸통: 좁고 앞뒤로 납작한 타원 기둥 (반지름 좌우 TORSO_A, 앞뒤 TORSO_B)
+  const TORSO_A = 0.115, TORSO_B = 0.075, LIMB_MARGIN = 0.04;
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(TORSO_A, TORSO_A * 0.9, 1, 28), bodyMat); scene.add(torso);
+  const neck = limb(0.04), clav = limb(0.04);
+  const arms = {uL: limb(0.045), fL: limb(0.035), uR: limb(0.045), fR: limb(0.035)};
+  const J = {}; ['sL', 'sR', 'eL', 'eR', 'wL', 'wR'].forEach(n => J[n] = ball(n[0] === 's' ? 0.058 : 0.047, jointMat));
+  const head = ball(0.1, bodyMat), nose = ball(0.026, noseMat), eyeL = ball(0.014, eyeMat), eyeR = ball(0.014, eyeMat);
+
+  const idx = Object.fromEntries(MOTION.points.map((name, i) => [name, i]));
+  const frames = MOTION.frames;
+  function pt(frame, name) { const p = frame[idx[name]]; return V(p[0], p[1], p[2]).add(HIP); }
+  function pose(frame) {
+    // 골반 기준 world 좌표 → 마네킹 좌표 (원점을 마네킹 골반으로)
+    const sL = pt(frame, 'left_shoulder'), sR = pt(frame, 'right_shoulder');
+    const eL = pt(frame, 'left_elbow'), eR = pt(frame, 'right_elbow'), wL = pt(frame, 'left_wrist'), wR = pt(frame, 'right_wrist');
+    const sMid = sL.clone().add(sR).multiplyScalar(0.5);
+    // 팔꿈치·손목이 몸통 안으로 들어가면 몸통 표면 밖으로 밀어낸다 (손을 가슴에 얹는 동작에서 팔이 몸을 뚫지 않게)
+    const base = HIP.clone().add(V(0, 0.04, 0)), top = sMid.clone().add(V(0, -0.04, 0));
+    const axis = top.clone().sub(base); const height = axis.length(); axis.normalize();
+    const across = sL.clone().sub(sR); across.addScaledVector(axis, -across.dot(axis)).normalize();
+    const front = new THREE.Vector3().crossVectors(across, axis).normalize();
+    if (front.z < 0) front.negate();
+    const pushOut = p => {
+      const rel = p.clone().sub(base); const along = rel.dot(axis);
+      if (along < -0.05 || along > height + 0.05) return p;
+      const x = rel.dot(across), z = rel.dot(front);
+      const a = TORSO_A + LIMB_MARGIN, b = TORSO_B + LIMB_MARGIN;
+      const inside = (x / a) ** 2 + (z / b) ** 2;
+      if (inside >= 1) return p;
+      let nx = x, nz = z;
+      if (Math.hypot(x, z) < 1e-4) { nz = b; } else { const k = 1 / Math.sqrt(inside); nx = x * k; nz = z * k; }
+      return base.clone().addScaledVector(axis, along).addScaledVector(across, nx).addScaledVector(front, nz);
+    };
+    const eLs = pushOut(eL), eRs = pushOut(eR), wLs = pushOut(wL), wRs = pushOut(wR);
+    eL.copy(eLs); eR.copy(eRs); wL.copy(wLs); wR.copy(wRs);
+    const earMid = pt(frame, 'left_ear').add(pt(frame, 'right_ear')).multiplyScalar(0.5);
+    const noseP = pt(frame, 'nose');
+    // 머리 중심 = 귀 중간에서 코 반대쪽으로 조금 (두개골 가운데)
+    const forward = noseP.clone().sub(earMid); const headC = earMid.clone().addScaledVector(forward, -0.15);
+    J.sL.position.copy(sL); J.sR.position.copy(sR); J.eL.position.copy(eL); J.eR.position.copy(eR); J.wL.position.copy(wL); J.wR.position.copy(wR);
+    place(arms.uL, sL, eL); place(arms.fL, eL, wL); place(arms.uR, sR, eR); place(arms.fR, eR, wR); place(clav, sL, sR);
+    place(torso, base, top);
+    torso.scale.set(1, height, TORSO_B / TORSO_A);  // 앞뒤로 납작하게
+    const neckTop = headC.clone().lerp(sMid, 0.35); place(neck, sMid, neckTop);
+    head.position.copy(headC); nose.position.copy(noseP);
+    eyeL.position.copy(pt(frame, 'left_eye')); eyeR.position.copy(pt(frame, 'right_eye'));
+  }
+  const speeds = [["느리게", 0.6], ["보통", 1], ["빠르게", 1.5]]; let speedIndex = 1;
+  let playing = true, t = 0, last = performance.now();
+  const playBtn = document.getElementById('play'), speedBtn = document.getElementById('speed');
+  playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? '정지' : '재생'; };
+  speedBtn.onclick = () => { speedIndex = (speedIndex + 1) % speeds.length; speedBtn.textContent = '속도 ' + speeds[speedIndex][0]; };
+  function loop(now) {
+    // requestAnimationFrame의 now가 performance.now()로 잡은 last보다 작을 수 있다(첫 프레임) → dt가 음수가 되지 않게
+    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now;
+    if (playing) t = (t + dt * MOTION.fps * speeds[speedIndex][1]) % frames.length;
+    if (!Number.isFinite(t) || t < 0) t = 0;
+    const index = Math.min(frames.length - 1, Math.floor(t));
+    pose(frames[index]); showStep(t / MOTION.fps); renderer.render(scene, cam); requestAnimationFrame(loop);
+  }
+  // 지금 단계 설명 (직접 만든 동작에만 있음)
+  const steps = MOTION.steps || [], captionEl = document.getElementById('caption'), stepEl = document.getElementById('stepno');
+  function showStep(sec) {
+    const index = steps.findIndex(step => sec >= step.from && sec < step.to);
+    captionEl.textContent = index >= 0 ? steps[index].text : '';
+    stepEl.textContent = index >= 0 ? `동작 ${index + 1} / ${steps.length}` : '';
+  }
+  window.seekSeconds = sec => { t = Math.min(frames.length - 1, Math.max(0, sec * MOTION.fps)); };  // 확인용: 특정 장면으로 이동
+  new ResizeObserver(size).observe(stage); size(); pose(frames[0]); requestAnimationFrame(loop);
+} catch (e) { document.getElementById('err').textContent = '마네킹을 띄우지 못했어요: ' + e.message; }
+</script>
+</body></html>

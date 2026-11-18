@@ -1,0 +1,90 @@
+﻿<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>관절 마네킹 예시</title>
+<style>
+body{margin:0;font-family:sans-serif;background:#f6f3fb;color:#2c2c2a}
+#stage{position:relative;width:100%;max-width:680px;height:420px;margin:16px auto 0;border-radius:12px;background:#ece8f4;overflow:hidden;touch-action:none;cursor:grab}
+#label{position:absolute;left:16px;top:12px;font-size:13px;color:#5f5e5a}
+#count{position:absolute;right:20px;top:10px;text-align:right;pointer-events:none}
+#rep{font-size:40px;font-weight:600;color:#3c2a55}
+.bar{display:flex;gap:8px;max-width:680px;margin:12px auto;flex-wrap:wrap;align-items:center}
+button{font-size:14px;padding:8px 14px;border-radius:8px;border:1px solid #c9c3d8;background:#fff;cursor:pointer}
+#err{color:#a32d2d;font-size:13px;max-width:680px;margin:8px auto}
+</style></head><body>
+<div id="stage"><div id="label">예시 · 앉아서 팔 위로 밀기</div>
+<div id="count"><span id="rep">0</span><span style="font-size:18px;color:#5f5e5a"> / 12회</span></div></div>
+<div class="bar"><button id="play">정지</button><button data-v="side">옆에서</button><button data-v="front">앞에서</button><button data-v="diag">비스듬히</button><span style="font-size:13px;color:#888;margin-left:auto">드래그해서 돌려보기</span></div>
+<div id="err"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+try {
+const stage=document.getElementById('stage');
+const H=420, W=()=>stage.clientWidth;
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(W(),H);
+stage.insertBefore(renderer.domElement,stage.firstChild);
+const scene=new THREE.Scene();
+const cam=new THREE.PerspectiveCamera(32,W()/H,0.1,50);
+const target=new THREE.Vector3(0,0.66,0.15);
+// 카메라: 대상 주위를 도는 각도(yaw)·높이(pitch)·거리
+let yaw=Math.PI/4,pitch=0.15,dist=3.0;
+const views={side:Math.PI/2,front:0,diag:Math.PI/4};
+function placeCam(){const d=dist*Math.max(1,1.4/(W()/H));cam.position.set(target.x+d*Math.cos(pitch)*Math.sin(yaw),target.y+d*Math.sin(pitch),target.z+d*Math.cos(pitch)*Math.cos(yaw));cam.lookAt(target);}
+placeCam();
+let drag=null;
+stage.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];stage.setPointerCapture(e.pointerId);});
+stage.addEventListener('pointermove',e=>{if(!drag)return;yaw-=(e.clientX-drag[0])*0.01;pitch=Math.max(-0.2,Math.min(1.2,pitch+(e.clientY-drag[1])*0.01));drag=[e.clientX,e.clientY];placeCam();});
+stage.addEventListener('pointerup',()=>drag=null);
+document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{yaw=views[b.dataset.v];pitch=0.15;placeCam();});
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x8a80a8,0.95));
+const sun=new THREE.DirectionalLight(0xffffff,0.75);sun.position.set(2,4,3);scene.add(sun);
+const bodyMat=new THREE.MeshStandardMaterial({color:0xd9d2e8,roughness:0.55});
+const jointMat=new THREE.MeshStandardMaterial({color:0x734091,roughness:0.4});
+const activeMat=new THREE.MeshStandardMaterial({color:0xef9f27,roughness:0.4});
+const chairMat=new THREE.MeshStandardMaterial({color:0x9a98a0,roughness:0.8});
+const floor=new THREE.Mesh(new THREE.CircleGeometry(1.1,48),new THREE.MeshStandardMaterial({color:0x8f88a6,roughness:1}));
+floor.rotation.x=-Math.PI/2;scene.add(floor);
+const box=(w,h,d,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),chairMat);m.position.set(x,y,z);scene.add(m);};
+box(0.5,0.05,0.46,0,0.44,0.05);box(0.5,0.45,0.04,0,0.69,-0.18);
+[[-0.22,-0.15],[0.22,-0.15],[-0.22,0.25],[0.22,0.25]].forEach(([x,z])=>box(0.035,0.42,0.035,x,0.21,z));
+
+const UP=new THREE.Vector3(0,1,0);
+function limb(r){const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r*0.9,1,20),bodyMat);scene.add(m);return m;}
+function place(m,a,b){const d=new THREE.Vector3().subVectors(b,a);const len=d.length();m.position.copy(a).addScaledVector(d,0.5);m.scale.set(1,len,1);m.quaternion.setFromUnitVectors(UP,d.normalize());}
+function joint(r,mat){const m=new THREE.Mesh(new THREE.SphereGeometry(r,24,16),mat);scene.add(m);return m;}
+const torso=new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.14,0.46,24),bodyMat);torso.position.set(0,0.77,0.02);scene.add(torso);
+const head=new THREE.Mesh(new THREE.SphereGeometry(0.105,32,24),bodyMat);head.position.set(0,1.22,0.04);scene.add(head);
+const neck=limb(0.04);
+const L={uL:limb(0.045),fL:limb(0.035),uR:limb(0.045),fR:limb(0.035),thL:limb(0.06),thR:limb(0.06),shL:limb(0.042),shR:limb(0.042),clav:limb(0.045),pelvis:limb(0.05)};
+const J={};
+['sL','sR','eL','eR'].forEach(n=>J[n]=joint(n[0]==='s'?0.06:0.05,activeMat));
+['wL','wR','hL','hR','kL','kR','aL','aR'].forEach(n=>J[n]=joint(n[0]==='w'||n[0]==='a'?0.045:0.055,jointMat));
+const V=(x,y,z)=>new THREE.Vector3(x,y,z);
+const P={hL:V(-0.11,0.52,0.02),hR:V(0.11,0.52,0.02),kL:V(-0.12,0.53,0.44),kR:V(0.12,0.53,0.44),aL:V(-0.12,0.07,0.47),aR:V(0.12,0.07,0.47)};
+place(L.thL,P.hL,P.kL);place(L.thR,P.hR,P.kR);place(L.shL,P.kL,P.aL);place(L.shR,P.kR,P.aR);place(L.pelvis,P.hL,P.hR);
+place(neck,V(0,1.0,0.02),V(0,1.14,0.03));
+for(const k in P)J[k].position.copy(P[k]);
+
+const U1=0.28,F1=0.26,PERIOD=2.6;
+const ease=t=>(1-Math.cos(t*Math.PI*2))/2;
+function update(t){
+  const p=ease(t), a=(-12+77*p)*Math.PI/180, b=(90+18*p)*Math.PI/180;
+  const sL=V(-0.19,1.0,0.02),sR=V(0.19,1.0,0.02);
+  const arm=(s,sg)=>{const e=V(s.x+sg*U1*Math.cos(a),s.y+U1*Math.sin(a),s.z+0.04);return[e,V(e.x+sg*F1*Math.cos(b),e.y+F1*Math.sin(b),e.z+0.02)];};
+  const [eL,wL]=arm(sL,-1),[eR,wR]=arm(sR,1);
+  const q={sL,sR,eL,eR,wL,wR};for(const k in q)J[k].position.copy(q[k]);
+  place(L.uL,sL,eL);place(L.fL,eL,wL);place(L.uR,sR,eR);place(L.fR,eR,wR);place(L.clav,sL,sR);
+}
+let playing=true,elapsed=0,last=performance.now(),reps=0,prev=0;
+const repEl=document.getElementById('rep'),playBtn=document.getElementById('play');
+playBtn.onclick=()=>{playing=!playing;playBtn.textContent=playing?'정지':'재생';};
+function loop(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  if(playing){elapsed+=dt;const ph=(elapsed%PERIOD)/PERIOD;if(prev<0.5&&ph>=0.5){reps=reps>=12?1:reps+1;repEl.textContent=reps;}prev=ph;}
+  update((elapsed%PERIOD)/PERIOD);renderer.render(scene,cam);requestAnimationFrame(loop);
+}
+update(0);requestAnimationFrame(loop);
+window.addEventListener('resize',()=>{renderer.setSize(W(),H);cam.aspect=W()/H;cam.updateProjectionMatrix();placeCam();});
+} catch(e){document.getElementById('err').textContent='오류: '+e.message;}
+</script></body></html>

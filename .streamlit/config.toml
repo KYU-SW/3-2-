@@ -1,0 +1,9 @@
+# 테마 색은 고정하지 않는다: 고정하면 다크모드가 막힌다 (휴대폰 설정을 따라감).
+# 보라색 강조색은 styles.py의 CSS로 입힌다.
+
+[server]
+headless = true
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
