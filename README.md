@@ -13,8 +13,6 @@
 ## 데모 및 시연 자료
 
 - Streamlit Community Cloud 배포 URL은 Firebase 설정과 배포 환경이 준비되면 추가합니다.
-- [사용 흐름 시각 자료](docs/visuals/1_사용흐름_순환도.png)
-- [시스템 아키텍처 이미지](docs/wheelance_architecture.png)
 
 ## 주요 기능
 
@@ -115,13 +113,11 @@ python make_secrets.py 다운로드한-서비스계정.json
 
 ## 화면 예시
 
-| 사용 흐름 | 측면 자세 변화 |
+| 측면 자세 변화 | 상체 각도 그래프 |
 | --- | --- |
-| [![사용 흐름](docs/visuals/1_사용흐름_순환도.png)](docs/visuals/1_사용흐름_순환도.png) | [![측면 비교](docs/visuals/2_측면_가만히vs밀때_사진.png)](docs/visuals/2_측면_가만히vs밀때_사진.png) |
+| [![측면 비교](docs/visuals/2_측면_가만히vs밀때_사진.png)](docs/visuals/2_측면_가만히vs밀때_사진.png) | [![상체 각도](docs/visuals/4_상체각도_시간그래프.png)](docs/visuals/4_상체각도_시간그래프.png) |
 
-| 상체 각도 그래프 | 추진 패턴 |
-| --- | --- |
-| [![상체 각도](docs/visuals/4_상체각도_시간그래프.png)](docs/visuals/4_상체각도_시간그래프.png) | [![추진 패턴](docs/visuals/7_미는패턴_3가지_그림.png)](docs/visuals/7_미는패턴_3가지_그림.png) |
+추진 패턴 예시는 [상세 시각 자료](docs/visuals/7_미는패턴_3가지_그림.png)에서 확인할 수 있습니다.
 
 ## 지원 환경 및 권장 사양
 
@@ -195,8 +191,8 @@ $env:PYTHONIOENCODING="utf-8"
 
 ## 구조 문서
 
-- [시스템 아키텍처](docs/ARCHITECTURE.md)
-- [추가 아키텍처 이미지](docs/wheelance_architecture.png)
+- [시스템 아키텍처 문서](docs/ARCHITECTURE.md)
+- [시스템 아키텍처 이미지](docs/wheelance_architecture.png)
 
 ## 과제 및 협업 정보
 
