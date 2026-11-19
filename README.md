@@ -113,9 +113,9 @@ python make_secrets.py 다운로드한-서비스계정.json
 
 ## 화면 예시
 
-| 측면 자세 변화 | 상체 각도 그래프 |
+| 측면 자세 비교 | 상체 각도 그래프 |
 | --- | --- |
-| [![측면 비교](docs/visuals/2_측면_가만히vs밀때_사진.png)](docs/visuals/2_측면_가만히vs밀때_사진.png) | [![상체 각도](docs/visuals/4_상체각도_시간그래프.png)](docs/visuals/4_상체각도_시간그래프.png) |
+| [![측면 비교](docs/visuals/2b_측면_가만히vs밀때_뼈대만.png)](docs/visuals/2b_측면_가만히vs밀때_뼈대만.png) | [![상체 각도](docs/visuals/4_상체각도_시간그래프.png)](docs/visuals/4_상체각도_시간그래프.png) |
 
 추진 패턴 예시는 [상세 시각 자료](docs/visuals/7_미는패턴_3가지_그림.png)에서 확인할 수 있습니다.
 
