@@ -14,7 +14,6 @@
 
 - Streamlit Community Cloud 배포 URL은 Firebase 설정과 배포 환경이 준비되면 추가합니다.
 - [사용 흐름 시각 자료](docs/visuals/1_사용흐름_순환도.png)
-- [과제 발표 자료 미리보기](docs/KY-FESTA_판넬_휠런스_미리보기.png)
 - [시스템 아키텍처 이미지](docs/wheelance_architecture.png)
 
 ## 주요 기능
